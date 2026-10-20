@@ -1,14 +1,15 @@
-import customtkinter as ctk
+import traceback
 
-import CTkMessagebox
+import customtkinter as ctk
+from CTkMessagebox import CTkMessagebox
 
 
 class TestApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("CTkMessagebox Test")
-        self.geometry("640x520")
-        self.minsize(520, 420)
+        self.geometry("720x560")
+        self.minsize(640, 480)
 
         self.status = ctk.CTkLabel(self, text="No dialog shown yet.", anchor="w")
         self.status.pack(side="bottom", fill="x", padx=12, pady=(4, 12))
@@ -45,15 +46,22 @@ class TestApp(ctk.CTk):
         ]
 
         for i, (label, cmd) in enumerate(tests):
-            btn = ctk.CTkButton(grid, text=label, command=cmd, width=200)
-            btn.grid(row=i // 3, column=i % 3, padx=6, pady=6, sticky="ew")
+            btn = ctk.CTkButton(grid, text=label, command=cmd)
+            btn.grid(row=i // 3, column=i % 3, padx=6, pady=6, sticky="nsew")
 
         for c in range(3):
-            grid.grid_columnconfigure(c, weight=1)
+            grid.grid_columnconfigure(c, weight=1, uniform="col")
+        for r in range((len(tests) + 2) // 3):
+            grid.grid_rowconfigure(r, weight=1, uniform="row")
 
     def _show(self, **kwargs) -> None:
-        box = CTkMessagebox(master=self, **kwargs)
-        answer = box.get()
+        try:
+            box = CTkMessagebox(master=self, **kwargs)
+            answer = box.get()
+        except Exception as exc:
+            traceback.print_exc()
+            self.status.configure(text=f"ERROR: {exc!r}")
+            return
         text = f"Answer: {answer!r}"
         print(text)
         self.status.configure(text=text)
@@ -186,7 +194,6 @@ class TestApp(ctk.CTk):
             icon="info",
             option_1="OK",
             header=True,
-            topmost=False,
         )
 
     def t_wrap(self) -> None:
@@ -236,17 +243,16 @@ class TestApp(ctk.CTk):
         )
 
     def t_no_master(self) -> None:
-        box = CTkMessagebox(
+        self._show(
             title="Screen centered",
             message="This dialog has no master and centers on the screen.",
             icon="info",
             option_1="OK",
         )
-        answer = box.get()
-        self.status.configure(text=f"Answer: {answer!r}")
 
 
 if __name__ == "__main__":
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
-    TestApp().mainloop()
+    app = TestApp()
+    app.mainloop()
