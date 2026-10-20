@@ -1,112 +1,115 @@
 """
 CustomTkinter Messagebox
-Author: Akash Bora
+Author: sirthegamercoder
 Version: 2.7
 """
 
-import customtkinter
-from PIL import Image, ImageTk
+from __future__ import annotations
+
 import os
 import sys
-import time
-from typing import Literal
+from typing import Any, Literal, Optional, Sequence, Tuple, Union
+
+import customtkinter
+from PIL import Image, ImageTk
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _is_color_string(value: Any) -> bool:
+    return isinstance(value, str)
 
 
 class CTkMessagebox(customtkinter.CTkToplevel):
-    ICONS = {
-        "check": None,
-        "cancel": None,
-        "info": None,
-        "question": None,
-        "warning": None,
-    }
-    ICON_BITMAP = {}
+    _ICON_CACHE: dict[tuple[str, tuple[int, int]], customtkinter.CTkImage] = {}
 
     def __init__(
         self,
-        master: any = None,
+        master: Any = None,
         width: int = 400,
         height: int = 200,
         title: str = "CTkMessagebox",
         message: str = "This is a CTkMessagebox!",
         option_1: str = "OK",
-        option_2: str = None,
-        option_3: str = None,
-        options: list = [],
+        option_2: Optional[str] = None,
+        option_3: Optional[str] = None,
+        options: Optional[Sequence[str]] = None,
         border_width: int = 1,
         border_color: str = "default",
-        button_color: str = "default",
+        button_color: Union[str, Tuple[str, ...]] = "default",
         bg_color: str = "default",
         fg_color: str = "default",
         text_color: str = "default",
         title_color: str = "default",
         button_text_color: str = "default",
-        button_width: int = None,
-        button_height: int = None,
-        cancel_button_color: str = None,
-        cancel_button: str = None,  # types: circle, cross or none
+        button_width: Optional[int] = None,
+        button_height: Optional[int] = None,
+        cancel_button_color: Optional[str] = None,
+        cancel_button: Optional[Literal["circle", "cross", "none"]] = None,
         button_hover_color: str = "default",
-        icon: str = "info",
-        icon_size: tuple = None,
+        icon: Optional[str] = "info",
+        icon_size: Optional[Tuple[int, int]] = None,
         corner_radius: int = 15,
-        justify: str = "right",
-        font: tuple = None,
+        justify: Literal["left", "center", "right"] = "right",
+        font: Optional[tuple] = None,
         header: bool = False,
         topmost: bool = True,
         fade_in_duration: int = 0,
         sound: bool = False,
         wraplength: int = 0,
-        option_focus: Literal[1, 2, 3] = None,
-    ):
+        option_focus: Optional[Literal[1, 2, 3]] = None,
+    ) -> None:
 
         super().__init__()
 
         self.master_window = master
+        self.event: Optional[str] = None
+        self._closing = False
+        self._fade_job: Optional[str] = None
+        self._return_funcid: Optional[str] = None
+        self.option_focus: Optional[int] = None
+        self.selected_button: Optional[customtkinter.CTkButton] = None
+        self.selected_option: Optional[str] = None
 
-        self.width = 250 if width < 250 else width
-        self.height = 150 if height < 150 else height
+        self.width = max(250, int(width))
+        self.height = max(150, int(height))
 
-        if self.master_window is None:
-            self.spawn_x = int((self.winfo_screenwidth() - self.width) / 2)
-            self.spawn_y = int((self.winfo_screenheight() - self.height) / 2)
+        if master is None:
+            spawn_x = int((self.winfo_screenwidth() - self.width) / 2)
+            spawn_y = int((self.winfo_screenheight() - self.height) / 2)
         else:
-            self.spawn_x = int(
-                self.master_window.winfo_width() * 0.5
-                + self.master_window.winfo_x()
-                - 0.5 * self.width
-                + 7
+            spawn_x = int(
+                master.winfo_width() * 0.5 + master.winfo_x() - 0.5 * self.width + 7
             )
-            self.spawn_y = int(
-                self.master_window.winfo_height() * 0.5
-                + self.master_window.winfo_y()
-                - 0.5 * self.height
-                + 20
+            spawn_y = int(
+                master.winfo_height() * 0.5 + master.winfo_y() - 0.5 * self.height + 20
             )
 
-        self.after(10)
-        self.geometry(f"{self.width}x{self.height}+{self.spawn_x}+{self.spawn_y}")
+        self.geometry(f"{self.width}x{self.height}+{spawn_x}+{spawn_y}")
         self.title(title)
-        self.resizable(width=False, height=False)
-        self.fade = fade_in_duration
+        self.resizable(False, False)
+
+        self.fade = int(fade_in_duration) if fade_in_duration else 0
+        if self.fade:
+            self.fade = max(20, self.fade)
+            self.attributes("-alpha", 0)
+
         self.oldx = 0
         self.oldy = 0
 
-        if self.fade:
-            self.fade = 20 if self.fade < 20 else self.fade
-            self.attributes("-alpha", 0)
-
         if not header:
-            self.overrideredirect(1)
+            self.overrideredirect(True)
 
         if topmost:
             self.attributes("-topmost", True)
         else:
-            self.transient(self.master_window)
+            self.transient(master)
 
         if sys.platform.startswith("win"):
-            self.transparent_color = self._apply_appearance_mode(self.cget("fg_color"))
-            self.attributes("-transparentcolor", self.transparent_color)
-            default_cancel_button = "cross"
+            self.transparent_color = self._resolve_transparent_color()
+            default_cancel_button: Optional[str] = "cross"
         elif sys.platform.startswith("darwin"):
             self.transparent_color = "systemTransparent"
             self.attributes("-transparent", True)
@@ -117,139 +120,112 @@ class CTkMessagebox(customtkinter.CTkToplevel):
             default_cancel_button = "cross"
 
         self.lift()
-
         self.config(background=self.transparent_color)
+
+        if sys.platform.startswith("win"):
+            try:
+                self.attributes("-transparentcolor", self.transparent_color)
+            except Exception:
+                self.transparent_color = "#000001"
+                self.attributes("-transparentcolor", self.transparent_color)
+
         self.protocol("WM_DELETE_WINDOW", self.button_event)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        self.x = self.winfo_x()
-        self.y = self.winfo_y()
-        self._title = title
-        self.message = message
-        self.font = font
-        self.justify = justify
-        self.sound = sound
-        self.cancel_button = cancel_button if cancel_button else default_cancel_button
-        self.round_corners = corner_radius if corner_radius <= 30 else 30
-        self.button_width = button_width if button_width else self.width / 4
-        self.button_height = button_height if button_height else 28
 
-        if self.fade:
-            self.attributes("-alpha", 0)
+        if options:
+            opts = list(options)
+            if len(opts) >= 1:
+                option_1 = opts[-1]
+            if len(opts) >= 2:
+                option_2 = opts[-2]
+            if len(opts) >= 3:
+                option_3 = opts[-3]
 
-        if self.button_height > self.height / 4:
-            self.button_height = self.height / 4 - 20
-        self.dot_color = cancel_button_color
-
-        self.border_width = border_width if border_width < 6 else 5
-
-        if type(options) is list and len(options) > 0:
-            try:
-                option_1 = options[-1]
-                option_2 = options[-2]
-                option_3 = options[-3]
-            except IndexError:
-                None
-
-        if bg_color == "default":
-            self.bg_color = self._apply_appearance_mode(
+        self.bg_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkFrame"]["fg_color"]
             )
-        else:
-            self.bg_color = bg_color
-
-        if self.dot_color == "transparent":
-            self.dot_color = self.bg_color
-
-        if fg_color == "default":
-            self.fg_color = self._apply_appearance_mode(
+            if bg_color == "default"
+            else bg_color
+        )
+        self.fg_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkFrame"]["top_fg_color"]
             )
-        else:
-            self.fg_color = fg_color
+            if fg_color == "default"
+            else fg_color
+        )
+
+        if sys.platform.startswith("win") and (
+            self.bg_color == self.transparent_color
+            or self.fg_color == self.transparent_color
+        ):
+            self.transparent_color = "#000001"
+            self.attributes("-transparentcolor", self.transparent_color)
+            self.config(background=self.transparent_color)
 
         default_button_color = self._apply_appearance_mode(
             customtkinter.ThemeManager.theme["CTkButton"]["fg_color"]
         )
+        self.button_color = self._normalize_button_color(
+            button_color, default_button_color
+        )
 
-        if sys.platform.startswith("win"):
-            if (
-                self.bg_color == self.transparent_color
-                or self.fg_color == self.transparent_color
-            ):
-                self.configure(fg_color="#000001")
-                self.transparent_color = "#000001"
-                self.attributes("-transparentcolor", self.transparent_color)
-
-        if button_color == "default":
-            self.button_color = (
-                default_button_color,
-                default_button_color,
-                default_button_color,
-            )
-        else:
-            if type(button_color) is tuple:
-                if len(button_color) == 2:
-                    self.button_color = (
-                        button_color[0],
-                        button_color[1],
-                        default_button_color,
-                    )
-                elif len(button_color) == 1:
-                    self.button_color = (
-                        button_color[0],
-                        default_button_color,
-                        default_button_color,
-                    )
-                else:
-                    self.button_color = button_color
-            else:
-                self.button_color = (button_color, button_color, button_color)
-
-        if text_color == "default":
-            self.text_color = self._apply_appearance_mode(
+        self.text_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkLabel"]["text_color"]
             )
-        else:
-            self.text_color = text_color
-
-        if title_color == "default":
-            self.title_color = self._apply_appearance_mode(
+            if text_color == "default"
+            else text_color
+        )
+        self.title_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkLabel"]["text_color"]
             )
-        else:
-            self.title_color = title_color
-
-        if button_text_color == "default":
-            self.bt_text_color = self._apply_appearance_mode(
+            if title_color == "default"
+            else title_color
+        )
+        self.bt_text_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkButton"]["text_color"]
             )
-        else:
-            self.bt_text_color = button_text_color
-
-        if button_hover_color == "default":
-            self.bt_hv_color = self._apply_appearance_mode(
+            if button_text_color == "default"
+            else button_text_color
+        )
+        self.bt_hv_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkButton"]["hover_color"]
             )
-        else:
-            self.bt_hv_color = button_hover_color
-
-        if border_color == "default":
-            self.border_color = self._apply_appearance_mode(
+            if button_hover_color == "default"
+            else button_hover_color
+        )
+        self.border_color = (
+            self._apply_appearance_mode(
                 customtkinter.ThemeManager.theme["CTkFrame"]["border_color"]
             )
-        else:
-            self.border_color = border_color
+            if border_color == "default"
+            else border_color
+        )
 
-        if icon_size:
-            self.size_height = (
-                icon_size[1] if icon_size[1] <= self.height - 100 else self.height - 100
-            )
-            self.size = (icon_size[0], self.size_height)
-        else:
-            self.size = (self.height / 4, self.height / 4)
+        self._title = title
+        self.message = message
+        self.font = font
+        self.justify = justify if justify in ("left", "center", "right") else "right"
+        self.sound = sound
+        self.cancel_button = cancel_button if cancel_button else default_cancel_button
+        self.round_corners = int(_clamp(corner_radius, 0, 30))
+        self.button_width = int(button_width) if button_width else int(self.width / 4)
+        self.button_height = int(button_height) if button_height else 28
+        self.button_height = int(_clamp(self.button_height, 1, self.height / 4 - 20))
+        self.border_width = int(_clamp(border_width, 0, 5))
 
-        self.icon = self.load_icon(icon, icon_size) if icon else None
+        self.dot_color = cancel_button_color
+        if self.dot_color == "transparent":
+            self.dot_color = self.bg_color
+
+        size = self._resolve_icon_size(icon_size)
+        self.icon = self.load_icon(icon, size) if icon else None
 
         self.frame_top = customtkinter.CTkFrame(
             self,
@@ -261,21 +237,19 @@ class CTkMessagebox(customtkinter.CTkToplevel):
             border_color=self.border_color,
         )
         self.frame_top.grid(sticky="nswe")
-
-        if button_width:
-            self.frame_top.grid_columnconfigure(0, weight=1)
-        else:
-            self.frame_top.grid_columnconfigure((1, 2, 3), weight=1)
-
-        if button_height:
-            self.frame_top.grid_rowconfigure((0, 1, 3), weight=1)
-        else:
-            self.frame_top.grid_rowconfigure((0, 1, 2), weight=1)
+        for col in range(6):
+            self.frame_top.grid_columnconfigure(col, weight=1)
+        for row in range(3):
+            self.frame_top.grid_rowconfigure(row, weight=1)
 
         self.frame_top.bind("<B1-Motion>", self.move_window)
         self.frame_top.bind("<ButtonPress-1>", self.oldxyset)
 
+        self.button_close: Optional[customtkinter.CTkButton] = None
         if self.cancel_button == "cross":
+            text_color = (
+                self.dot_color if _is_color_string(self.dot_color) else self.title_color
+            )
             self.button_close = customtkinter.CTkButton(
                 self.frame_top,
                 corner_radius=10,
@@ -283,7 +257,7 @@ class CTkMessagebox(customtkinter.CTkToplevel):
                 height=0,
                 hover=False,
                 border_width=0,
-                text_color=self.dot_color if self.dot_color else self.title_color,
+                text_color=text_color,
                 text="✕",
                 fg_color="transparent",
                 command=self.button_event,
@@ -304,7 +278,9 @@ class CTkMessagebox(customtkinter.CTkToplevel):
                 hover=False,
                 border_width=0,
                 text="",
-                fg_color=self.dot_color if self.dot_color else "#c42b1c",
+                fg_color=(
+                    self.dot_color if _is_color_string(self.dot_color) else "#c42b1c"
+                ),
                 command=self.button_event,
             )
             self.button_close.grid(row=0, column=5, sticky="ne", padx=10, pady=10)
@@ -334,367 +310,418 @@ class CTkMessagebox(customtkinter.CTkToplevel):
             text_color=self.text_color,
             image=self.icon,
         )
-        self.info._text_label.configure(wraplength=self.width / 2, justify="left")
+        self.info._text_label.configure(
+            wraplength=int(wraplength) if wraplength > 0 else int(self.width / 2),
+            justify="left",
+        )
         self.info.grid(
             row=1, column=0, columnspan=6, sticky="nwes", padx=self.border_width
         )
 
-        if wraplength > 0:
-            self.info._text_label.configure(wraplength=wraplength)
+        self.option_text_1: Optional[str] = option_1
+        self.option_text_2: Optional[str] = option_2
+        self.option_text_3: Optional[str] = option_3
 
-        if self.info._text_label.winfo_reqheight() > self.height / 2:
-            height_offset = int(
-                (self.info._text_label.winfo_reqheight())
-                - (self.height / 2)
-                + self.height
-            )
-            self.geometry(f"{self.width}x{height_offset}")
+        self.button_1: Optional[customtkinter.CTkButton] = None
+        self.button_2: Optional[customtkinter.CTkButton] = None
+        self.button_3: Optional[customtkinter.CTkButton] = None
 
-        self.option_text_1 = option_1
+        self.button_1 = self._make_option_button(self.option_text_1, 0)
+        if self.option_text_2 is not None:
+            self.button_2 = self._make_option_button(self.option_text_2, 1)
+        if self.option_text_3 is not None:
+            self.button_3 = self._make_option_button(self.option_text_3, 2)
 
-        self.button_1 = customtkinter.CTkButton(
+        self._layout_buttons()
+
+        if header:
+            self.title_label.configure(text="")
+            self.title_label.grid_configure(pady=0)
+            if self.button_close is not None:
+                self.button_close.configure(text_color=self.bg_color)
+            self.frame_top.configure(corner_radius=0)
+
+        self.after_idle(self._grab_and_bind_keys)
+
+        if option_focus in (1, 2, 3):
+            self.after_idle(lambda: self.focus_button(option_focus))
+        elif (
+            self.option_text_2 is None and self.option_text_3 is None and self.button_1
+        ):
+            self.after_idle(self._focus_default)
+
+        if self.sound:
+            self.after(50, self._safe_bell)
+
+        if self.fade:
+            self.after_idle(self.fade_in)
+
+        self.after_idle(self._auto_resize_for_message)
+
+    def _resolve_transparent_color(self) -> str:
+        try:
+            value = self._apply_appearance_mode(self.cget("fg_color"))
+        except Exception:
+            value = "#000001"
+        return value if _is_color_string(value) else "#000001"
+
+    @staticmethod
+    def _normalize_button_color(
+        button_color: Union[str, Tuple[str, ...]], default: str
+    ) -> Tuple[str, str, str]:
+        if button_color == "default":
+            return (default, default, default)
+        if isinstance(button_color, tuple):
+            n = len(button_color)
+            if n == 1:
+                return (button_color[0], default, default)
+            if n == 2:
+                return (button_color[0], button_color[1], default)
+            return (button_color[0], button_color[1], button_color[2])
+        return (button_color, button_color, button_color)
+
+    def _resolve_icon_size(
+        self, icon_size: Optional[Tuple[int, int]]
+    ) -> Tuple[int, int]:
+        if icon_size:
+            w = max(1, int(icon_size[0]))
+            h = max(1, int(min(icon_size[1], self.height - 100)))
+        else:
+            w = h = max(1, int(self.height / 4))
+        return (w, h)
+
+    def _make_option_button(
+        self, text: Optional[str], index: int
+    ) -> customtkinter.CTkButton:
+        return customtkinter.CTkButton(
             self.frame_top,
-            text=self.option_text_1,
-            fg_color=self.button_color[0],
+            text=text,
+            fg_color=self.button_color[index],
             width=self.button_width,
             font=self.font,
             text_color=self.bt_text_color,
             hover_color=self.bt_hv_color,
             height=self.button_height,
-            command=lambda: self.button_event(self.option_text_1),
+            command=lambda t=text: self.button_event(t),
         )
 
-        self.option_text_2 = option_2
-        if option_2:
-            self.button_2 = customtkinter.CTkButton(
-                self.frame_top,
-                text=self.option_text_2,
-                fg_color=self.button_color[1],
-                width=self.button_width,
-                font=self.font,
-                text_color=self.bt_text_color,
-                hover_color=self.bt_hv_color,
-                height=self.button_height,
-                command=lambda: self.button_event(self.option_text_2),
-            )
-
-        self.option_text_3 = option_3
-        if option_3:
-            self.button_3 = customtkinter.CTkButton(
-                self.frame_top,
-                text=self.option_text_3,
-                fg_color=self.button_color[2],
-                width=self.button_width,
-                font=self.font,
-                text_color=self.bt_text_color,
-                hover_color=self.bt_hv_color,
-                height=self.button_height,
-                command=lambda: self.button_event(self.option_text_3),
-            )
+    def _layout_buttons(self) -> None:
+        has2 = self.button_2 is not None
+        has3 = self.button_3 is not None
+        span = 1 if self.button_width else 2
 
         if self.justify == "center":
-            if button_width:
-                columns = [4, 3, 2]
-                span = 1
+            if has3:
+                cols = [4, 2, 0]
+            elif has2:
+                cols = [2, 3, 0]
             else:
-                columns = [4, 2, 0]
-                span = 2
-            if option_3:
-                self.frame_top.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-                self.button_1.grid(
-                    row=2,
-                    column=columns[0],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(0, 10),
-                    pady=10,
-                )
-                self.button_2.grid(
-                    row=2,
-                    column=columns[1],
-                    columnspan=span,
-                    sticky="news",
-                    padx=10,
-                    pady=10,
-                )
-                self.button_3.grid(
-                    row=2,
-                    column=columns[2],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(10, 0),
-                    pady=10,
-                )
-            elif option_2:
-                self.frame_top.columnconfigure((0, 5), weight=1)
-                columns = [2, 3]
-                self.button_1.grid(
-                    row=2, column=columns[0], sticky="news", padx=(0, 5), pady=10
-                )
-                self.button_2.grid(
-                    row=2, column=columns[1], sticky="news", padx=(5, 0), pady=10
-                )
+                cols = [2, 0, 0]
+            if has3:
+                self._grid(self.button_1, 2, cols[0], span, (0, 10))
+                self._grid(self.button_2, 2, cols[1], span, (10, 10))
+                self._grid(self.button_3, 2, cols[2], span, (10, 0))
+            elif has2:
+                self._grid(self.button_1, 2, 2, 2, (0, 5))
+                self._grid(self.button_2, 2, 4, 2, (5, 0))
             else:
-                if button_width:
-                    self.frame_top.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-                else:
-                    self.frame_top.columnconfigure((0, 2, 4), weight=2)
-                self.button_1.grid(
-                    row=2,
-                    column=columns[1],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(0, 10),
-                    pady=10,
-                )
+                self._grid(self.button_1, 2, 2, 2, (0, 10))
+
         elif self.justify == "left":
-            self.frame_top.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-            if button_width:
-                columns = [0, 1, 2]
-                span = 1
-            else:
-                columns = [0, 2, 4]
-                span = 2
-            if option_3:
-                self.button_1.grid(
-                    row=2,
-                    column=columns[2],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(0, 10),
-                    pady=10,
+            if has3:
+                self._grid(self.button_3, 2, 0, span, (10, 0))
+                self._grid(
+                    self.button_2, 2, 2 if not self.button_width else 1, span, (10, 10)
                 )
-                self.button_2.grid(
-                    row=2,
-                    column=columns[1],
-                    columnspan=span,
-                    sticky="news",
-                    padx=10,
-                    pady=10,
+                self._grid(
+                    self.button_1, 2, 4 if not self.button_width else 2, span, (0, 10)
                 )
-                self.button_3.grid(
-                    row=2,
-                    column=columns[0],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(10, 0),
-                    pady=10,
-                )
-            elif option_2:
-                self.button_1.grid(
-                    row=2,
-                    column=columns[1],
-                    columnspan=span,
-                    sticky="news",
-                    padx=10,
-                    pady=10,
-                )
-                self.button_2.grid(
-                    row=2,
-                    column=columns[0],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(10, 0),
-                    pady=10,
+            elif has2:
+                self._grid(self.button_2, 2, 0, span, (10, 0))
+                self._grid(
+                    self.button_1, 2, 2 if not self.button_width else 1, span, (10, 10)
                 )
             else:
-                self.button_1.grid(
-                    row=2,
-                    column=columns[0],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(10, 0),
-                    pady=10,
-                )
+                self._grid(self.button_1, 2, 0, span, (10, 0))
+
         else:
-            self.frame_top.columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
-            if button_width:
-                columns = [5, 4, 3]
-                span = 1
+            if self.button_width:
+                cols = [5, 4, 3]
             else:
-                columns = [4, 2, 0]
-                span = 2
-            self.button_1.grid(
-                row=2,
-                column=columns[0],
-                columnspan=span,
-                sticky="news",
-                padx=(0, 10),
-                pady=10,
-            )
-            if option_2:
-                self.button_2.grid(
-                    row=2,
-                    column=columns[1],
-                    columnspan=span,
-                    sticky="news",
-                    padx=10,
-                    pady=10,
-                )
-            if option_3:
-                self.button_3.grid(
-                    row=2,
-                    column=columns[2],
-                    columnspan=span,
-                    sticky="news",
-                    padx=(10, 0),
-                    pady=10,
-                )
+                cols = [4, 2, 0]
+            self._grid(self.button_1, 2, cols[0], span, (0, 10))
+            if has2:
+                self._grid(self.button_2, 2, cols[1], span, (10, 10))
+            if has3:
+                self._grid(self.button_3, 2, cols[2], span, (10, 0))
 
-        if header:
-            self.title_label.configure(text="")
-            self.title_label.grid_configure(pady=0)
-            self.button_close.configure(text_color=self.bg_color)
-            self.frame_top.configure(corner_radius=0)
+    def _grid(
+        self,
+        button: Optional[customtkinter.CTkButton],
+        row: int,
+        column: int,
+        span: int,
+        padx: Tuple[int, int],
+    ) -> None:
+        if button is None:
+            return
+        button.grid(
+            row=row,
+            column=column,
+            columnspan=span,
+            sticky="news",
+            padx=padx,
+            pady=10,
+        )
 
-        if self.winfo_exists():
+    def _focus_default(self) -> None:
+        if self.button_1 is None or not self.winfo_exists():
+            return
+        self.button_1.focus()
+        self._bind_return(self.button_1, self.option_text_1)
+
+    def _bind_return(
+        self, button: customtkinter.CTkButton, option: Optional[str]
+    ) -> None:
+        self._unbind_return()
+        self._return_funcid = button.bind(
+            "<Return>", lambda event, opt=option: self.button_event(opt), add="+"
+        )
+
+    def _unbind_return(self) -> None:
+        if self.selected_button is not None and self._return_funcid is not None:
+            try:
+                self.selected_button.unbind("<Return>", self._return_funcid)
+            except Exception:
+                pass
+        self._return_funcid = None
+
+    def _grab_and_bind_keys(self) -> None:
+        if not self.winfo_exists():
+            return
+        try:
             self.grab_set()
-
-        if self.sound:
-            self.bell()
-
-        if self.fade:
-            self.fade_in()
-
-        if option_focus:
-            self.option_focus = option_focus
-            self.focus_button(self.option_focus)
-        else:
-            if not self.option_text_2 and not self.option_text_3:
-                self.button_1.focus()
-                self.button_1.bind(
-                    "<Return>", lambda event: self.button_event(self.option_text_1)
-                )
-
+        except Exception:
+            pass
         self.bind("<Escape>", lambda e: self.button_event())
+        self.bind("<Left>", lambda e: self.change_left())
+        self.bind("<Right>", lambda e: self.change_right())
 
-    def place_widget(self, widget, x=10, y=10, **args):
-        if "master" in args:
-            del args["master"]
+    def _safe_bell(self) -> None:
+        if self.winfo_exists():
+            try:
+                self.bell()
+            except Exception:
+                pass
 
+    def _auto_resize_for_message(self) -> None:
+        if not self.winfo_exists():
+            return
+        try:
+            needed = self.info._text_label.winfo_reqheight()
+        except Exception:
+            return
+        if needed <= self.height / 2:
+            return
+        new_height = int(needed - self.height / 2 + self.height)
+        self.height = new_height
+        self.geometry(f"{self.width}x{new_height}+{self.winfo_x()}+{self.winfo_y()}")
+
+    def place_widget(self, widget, x: int = 10, y: int = 10, **args):
+        args.pop("master", None)
         new_widget = widget(master=self.frame_top, **args)
         new_widget.place(x=x, y=y)
         return new_widget
 
-    def focus_button(self, option_focus):
+    def focus_button(self, option_focus: int) -> None:
+        if option_focus not in (1, 2, 3):
+            return
+        button = getattr(self, f"button_{option_focus}", None)
+        option = getattr(self, f"option_text_{option_focus}", None)
+        if button is None or option is None or not self.winfo_exists():
+            return
+
+        if self.selected_button is not None:
+            try:
+                self.selected_button.configure(border_width=0)
+            except Exception:
+                pass
+            self._unbind_return()
+
+        self.option_focus = option_focus
+        self.selected_button = button
+        self.selected_option = option
+        button.focus()
         try:
-            self.selected_button = getattr(self, "button_" + str(option_focus))
-            self.selected_button.focus()
-            self.selected_button.configure(
-                border_color=self.bt_hv_color, border_width=3
+            button.configure(border_color=self.bt_hv_color, border_width=3)
+        except Exception:
+            pass
+        self._bind_return(button, option)
+
+    def change_left(self) -> None:
+        if self.option_focus in (None, 3):
+            return
+        nxt = self.option_focus + 1
+        while nxt <= 3 and getattr(self, f"button_{nxt}", None) is None:
+            nxt += 1
+        if nxt <= 3:
+            self.focus_button(nxt)
+
+    def change_right(self) -> None:
+        if self.option_focus in (None, 1):
+            return
+        nxt = self.option_focus - 1
+        while nxt >= 1 and getattr(self, f"button_{nxt}", None) is None:
+            nxt -= 1
+        if nxt >= 1:
+            self.focus_button(nxt)
+
+    def load_icon(
+        self, icon: str, size: Tuple[int, int]
+    ) -> Optional[customtkinter.CTkImage]:
+        key = (icon, size)
+        if key in self._ICON_CACHE:
+            cached = self._ICON_CACHE[key]
+            self._set_window_icon(icon)
+            return cached
+
+        if icon in ("check", "cancel", "info", "question", "warning"):
+            image_path = os.path.join(
+                os.path.dirname(os.path.realpath(__file__)), "icons", icon + ".png"
             )
-            self.selected_option = getattr(self, "option_text_" + str(option_focus))
-            self.selected_button.bind(
-                "<Return>", lambda event: self.button_event(self.selected_option)
-            )
-        except AttributeError:
+        else:
+            image_path = icon
+
+        try:
+            pil_image = Image.open(image_path)
+        except Exception:
+            return None
+
+        ctk_image = customtkinter.CTkImage(pil_image, size=size)
+        self._ICON_CACHE[key] = ctk_image
+        self._window_bitmap = ImageTk.PhotoImage(file=image_path)
+        self._set_window_icon(icon)
+        return ctk_image
+
+    def _set_window_icon(self, icon: str) -> None:
+        if sys.platform.startswith("darwin"):
+            return
+        bitmap = getattr(self, "_window_bitmap", None)
+        if bitmap is None:
             return
 
-        self.bind("<Left>", lambda e: self.change_left())
-        self.bind("<Right>", lambda e: self.change_right())
-
-    def change_left(self):
-        if self.option_focus == 3:
-            return
-
-        self.selected_button.unbind("<Return>")
-        self.selected_button.configure(border_width=0)
-
-        if self.option_focus == 1:
-            if self.option_text_2:
-                self.option_focus = 2
-
-        elif self.option_focus == 2:
-            if self.option_text_3:
-                self.option_focus = 3
-
-        self.focus_button(self.option_focus)
-
-    def change_right(self):
-        if self.option_focus == 1:
-            return
-
-        self.selected_button.unbind("<Return>")
-        self.selected_button.configure(border_width=0)
-
-        if self.option_focus == 2:
-            self.option_focus = 1
-
-        elif self.option_focus == 3:
-            self.option_focus = 2
-
-        self.focus_button(self.option_focus)
-
-    def load_icon(self, icon, icon_size):
-        if icon not in self.ICONS or self.ICONS[icon] is None:
-            if icon in ["check", "cancel", "info", "question", "warning"]:
-                image_path = os.path.join(
-                    os.path.dirname(os.path.realpath(__file__)), "icons", icon + ".png"
-                )
-            else:
-                image_path = icon
-            if icon_size:
-                size_height = (
-                    icon_size[1]
-                    if icon_size[1] <= self.height - 100
-                    else self.height - 100
-                )
-                size = (icon_size[0], size_height)
-            else:
-                size = (self.height / 4, self.height / 4)
-            self.ICONS[icon] = customtkinter.CTkImage(Image.open(image_path), size=size)
-            self.ICON_BITMAP[icon] = ImageTk.PhotoImage(file=image_path)
-        if not sys.platform.startswith("darwin"):
-            self.after(200, lambda: self.iconphoto(False, self.ICON_BITMAP[icon]))
-        return self.ICONS[icon]
-
-    def fade_in(self):
-        for i in range(0, 110, 10):
+        def _apply() -> None:
             if not self.winfo_exists():
-                break
-            self.attributes("-alpha", i / 100)
-            self.update()
-            time.sleep(1 / self.fade)
+                return
+            try:
+                self.iconphoto(False, bitmap)
+            except Exception:
+                pass
 
-    def fade_out(self):
-        for i in range(100, 0, -10):
+        self.after(200, _apply)
+
+    def fade_in(self) -> None:
+        if not self.winfo_exists():
+            return
+        steps = max(1, int(self.fade))
+        interval = max(1, int(1000 / steps))
+
+        def _step(alpha: int = 0) -> None:
             if not self.winfo_exists():
-                break
-            self.attributes("-alpha", i / 100)
-            self.update()
-            time.sleep(1 / self.fade)
+                return
+            try:
+                self.attributes("-alpha", alpha / 100)
+            except Exception:
+                return
+            if alpha >= 100:
+                return
+            self._fade_job = self.after(interval, _step, alpha + 10)
 
-    def get(self):
+        _step(0)
+
+    def fade_out(self, on_done=None) -> None:
+        if not self.winfo_exists() or not self.fade:
+            if on_done:
+                on_done()
+            return
+        steps = max(1, int(self.fade))
+        interval = max(1, int(1000 / steps))
+
+        def _step(alpha: int = 100) -> None:
+            if not self.winfo_exists():
+                return
+            try:
+                self.attributes("-alpha", alpha / 100)
+            except Exception:
+                pass
+            if alpha <= 0:
+                if on_done:
+                    on_done()
+                return
+            self._fade_job = self.after(interval, _step, alpha - 10)
+
+        _step(100)
+
+    def get(self) -> Optional[str]:
         if self.winfo_exists():
-            self.master.wait_window(self)
+            try:
+                self.master.wait_window(self)
+            except Exception:
+                pass
         return self.event
 
-    def oldxyset(self, event):
+    def oldxyset(self, event) -> None:
         self.oldx = event.x
         self.oldy = event.y
 
-    def move_window(self, event):
-        self.y = event.y_root - self.oldy
+    def move_window(self, event) -> None:
+        if not self.winfo_exists():
+            return
         self.x = event.x_root - self.oldx
+        self.y = event.y_root - self.oldy
         self.geometry(f"+{self.x}+{self.y}")
 
-    def button_event(self, event=None):
-        try:
-            self.button_1.configure(state="disabled")
-            self.button_2.configure(state="disabled")
-            self.button_3.configure(state="disabled")
-        except AttributeError:
-            pass
+    def button_event(self, event: Optional[str] = None) -> None:
+        if self._closing:
+            return
+        self._closing = True
+
+        if self._fade_job is not None:
+            try:
+                self.after_cancel(self._fade_job)
+            except Exception:
+                pass
+            self._fade_job = None
+
+        for name in ("button_1", "button_2", "button_3"):
+            btn = getattr(self, name, None)
+            if btn is not None:
+                try:
+                    btn.configure(state="disabled")
+                except Exception:
+                    pass
+
+        self.event = event
+
+        def _finish() -> None:
+            if not self.winfo_exists():
+                return
+            try:
+                self.grab_release()
+            except Exception:
+                pass
+            try:
+                self.destroy()
+            except Exception:
+                pass
+            if self.master_window is not None:
+                try:
+                    if self.master_window.winfo_exists():
+                        self.master_window.focus_force()
+                except Exception:
+                    pass
 
         if self.fade:
-            self.fade_out()
-        self.grab_release()
-        self.destroy()
-        self.event = event
-        if self.master_window:
-            self.master_window.focus_force()
-
-
-if __name__ == "__main__":
-    app = CTkMessagebox()
-    app.mainloop()
+            self.fade_out(on_done=_finish)
+        else:
+            _finish()
