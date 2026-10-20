@@ -1,7 +1,7 @@
 """
 CustomTkinter Messagebox
 Author: sirthegamercoder
-Version: 2.7
+Version: 3.5
 """
 
 from __future__ import annotations
